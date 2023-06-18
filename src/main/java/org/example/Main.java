@@ -36,25 +36,31 @@ public class Main {
 
         entity1.addSource(source1);
         var uuid2 = entity1.addSource(source2);
-        entity2.addSource(source3);
+        var uuid3 = entity2.addSource(source3);
 
         Thread.sleep(5000);
 
         entity1.pauseSource(uuid2).ifPresent(f ->
                 f.thenCompose(source -> {
-                    try {
-                        System.out.println("|||===== source 2 paused, waiting...");
+                            try {
+                                System.out.println("|||===== source 2 paused, waiting...");
 
-                        Thread.sleep(5_000);
+                                Thread.sleep(5_000);
 
-                        System.out.println("|||===== adding source 2 to entity 2, waiting...");
-                        return entity2.addPausedSource(source);
-                    } catch (InterruptedException e) {
-                        throw new RuntimeException(e);
-                    }
-                })
-                .thenAccept((ignored) -> System.out.println("|||==== restarted source 2"))
+                                System.out.println("|||===== adding source 2 to entity 2, waiting...");
+                                return entity2.addPausedSource(source);
+                            } catch (InterruptedException e) {
+                                throw new RuntimeException(e);
+                            }
+                        })
+                        .thenAccept((ignored) -> System.out.println("|||==== restarted source 2"))
         );
+
+        Thread.sleep(15_000);
+
+        System.out.println("|||===== stopping source 3");
+
+        entity2.killSource(uuid3);
     }
 
     private static Source<Object, NotUsed> createRangeSource(String format) {
@@ -62,6 +68,12 @@ public class Main {
                 .map(format::formatted)
                 .map(n -> (Object) n)
                 .throttle(1, Duration.ofSeconds(4));
+    }
+
+    static CompletionStage<PauseableSource> flipValve(PauseableSource source, SwitchMode mode) {
+        return source.valveSwitch
+                .thenCompose(v -> FutureConverters.asJava(v.flip(mode)))
+                .thenApply(ignore -> source);
     }
 
     @Data
@@ -119,11 +131,7 @@ public class Main {
         }
 
         public CompletionStage<UUID> addPausedSource(PauseableSource source) {
-            return source.valveSwitch.thenApply(v -> {
-                System.out.println("Flipping source to open");
-                v.flip(new SwitchMode.Open$());
-                return addSource(source);
-            });
+            return flipValve(source, new SwitchMode.Open$()).thenApply(this::addSource);
         }
 
         public UUID addSource(PauseableSource source) {
@@ -150,11 +158,21 @@ public class Main {
             }
 
             return Optional.of(
-                    source.source.valveSwitch.thenApply(v -> {
-                        v.flip(new SwitchMode.Close$());
+                flipValve(source.source, new SwitchMode.Close$())
+                    .thenApply(s -> {
                         source.broadcastKillSwitch.shutdown();
-                        return source.source;
+                        return s;
                     }));
+        }
+
+        public void killSource(UUID uuid) {
+            var source = sources.remove(uuid);
+            if (source == null) {
+                return;
+            }
+
+            source.broadcastKillSwitch.shutdown();
+            source.source.killSwitch.shutdown();
         }
     }
 }
