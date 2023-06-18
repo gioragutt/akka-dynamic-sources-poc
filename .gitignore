@@ -9,6 +9,7 @@ build/
 .idea/workspace.xml
 .idea/jarRepositories.xml
 .idea/compiler.xml
+.idea/inspectionProfiles/
 .idea/libraries/
 *.iws
 *.iml
